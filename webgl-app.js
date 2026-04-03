@@ -5,6 +5,9 @@ class TerrainSegmenter {
         this.canvas = document.getElementById('glCanvas');
         this.gl = null;
         this.program = null;
+        this.postProcessProgram = null;
+        this.framebuffer = null;
+        this.framebufferTexture = null;
         this.originalTexture = null;
         this.segmentedTexture = null;
         this.vertices = null;
@@ -46,6 +49,12 @@ class TerrainSegmenter {
         // Create shader program
         await this.createShaderProgram();
         
+        // Create post-processing shader program
+        await this.createPostProcessShader();
+        
+        // Create framebuffer for two-pass rendering
+        this.createFramebuffer();
+        
         // Create vertex buffer for a full-screen quad
         this.createQuad();
         
@@ -64,262 +73,22 @@ class TerrainSegmenter {
     }
     
     async loadShaderFile(path) {
-        try {
-            const response = await fetch(path);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: Failed to load shader: ${path}`);
-            }
-            return await response.text();
-        } catch (error) {
-            console.warn('Failed to load external shader file:', error.message);
-            console.log('Note: If running locally, use a local server (e.g., Live Server extension) or the fallback shaders will be used.');
-            throw error;
+        const response = await fetch(path);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: Failed to load shader: ${path}`);
         }
-    }
-    
-    getFallbackVertexShader() {
-        return `
-attribute vec2 a_position;
-attribute vec2 a_texCoord;
-varying vec2 v_texCoord;
-
-void main() {
-    gl_Position = vec4(a_position, 0.0, 1.0);
-    v_texCoord = a_texCoord;
-}`;
-    }
-    
-    getFallbackFragmentShader() {
-        return `
-precision mediump float;
-uniform sampler2D u_originalTexture;
-uniform sampler2D u_segmentedTexture;
-uniform int u_mode; // 0: original, 1: segmented, 2: overlay
-uniform bool u_hasTexture;
-uniform float u_overlayStrength;
-uniform float u_time;
-uniform vec2 u_resolution;
-varying vec2 v_texCoord;
-
-// Noise functions for procedural patterns
-float random(vec2 st) {
-    return fract(sin(dot(st.xy, vec2(12.9898, 78.233))) * 43758.5453123);
-}
-
-float noise(vec2 st) {
-    vec2 i = floor(st);
-    vec2 f = fract(st);
-    float a = random(i);
-    float b = random(i + vec2(1.0, 0.0));
-    float c = random(i + vec2(0.0, 1.0));
-    float d = random(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(a, b, u.x) + (c - a)* u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
-}
-
-float fbm(vec2 st) {
-    float value = 0.0;
-    float amplitude = 0.5;
-    float frequency = 0.0;
-    for (int i = 0; i < 4; i++) {
-        value += amplitude * noise(st);
-        st *= 2.0;
-        amplitude *= 0.5;
-    }
-    return value;
-}
-
-// Water wave patterns
-vec3 applyWaterPattern(vec3 baseColor, vec2 uv) {
-    vec2 waveUv = uv * 15.0;
-    float wave1 = sin(waveUv.x * 2.0 + u_time * 2.0) * 0.5 + 0.5;
-    float wave2 = sin(waveUv.y * 1.5 + u_time * 1.5) * 0.5 + 0.5;
-    float wave3 = sin((waveUv.x + waveUv.y) * 1.2 + u_time * 0.8) * 0.5 + 0.5;
-    
-    float waves = (wave1 + wave2 + wave3) / 3.0;
-    waves = smoothstep(0.3, 0.7, waves);
-    
-    vec3 lightWater = vec3(0.4, 0.7, 0.9);
-    vec3 darkWater = vec3(0.1, 0.3, 0.6);
-    
-    return mix(darkWater, lightWater, waves);
-}
-
-// Mountain ridge patterns
-vec3 applyMountainPattern(vec3 baseColor, vec2 uv) {
-    vec2 ridgeUv = uv * 20.0;
-    float ridges = fbm(ridgeUv * 0.5);
-    ridges += fbm(ridgeUv * 1.0) * 0.5;
-    ridges += fbm(ridgeUv * 2.0) * 0.25;
-    
-    ridges = smoothstep(0.2, 0.8, ridges);
-    
-    vec3 darkBrown = vec3(0.3, 0.2, 0.1);
-    vec3 lightBrown = vec3(0.7, 0.5, 0.3);
-    vec3 snow = vec3(0.9, 0.9, 0.95);
-    
-    vec3 mountainColor = mix(darkBrown, lightBrown, ridges);
-    if (ridges > 0.7) {
-        mountainColor = mix(mountainColor, snow, (ridges - 0.7) * 3.33);
-    }
-    
-    return mountainColor;
-}
-
-// Forest leaf patterns
-vec3 applyForestPattern(vec3 baseColor, vec2 uv) {
-    vec2 leafUv = uv * 25.0;
-    float leaves1 = fbm(leafUv);
-    float leaves2 = fbm(leafUv * 1.5 + vec2(100.0, 50.0));
-    
-    float pattern = abs(sin(leaves1 * 6.28) * sin(leaves2 * 6.28));
-    pattern = smoothstep(0.1, 0.9, pattern);
-    
-    vec3 darkGreen = vec3(0.1, 0.3, 0.1);
-    vec3 lightGreen = vec3(0.3, 0.7, 0.2);
-    vec3 brightGreen = vec3(0.5, 0.9, 0.3);
-    
-    vec3 forestColor = mix(darkGreen, lightGreen, pattern);
-    if (pattern > 0.7) {
-        forestColor = mix(forestColor, brightGreen, (pattern - 0.7) * 3.33);
-    }
-    
-    return forestColor;
-}
-
-// City building patterns
-vec3 applyCityPattern(vec3 baseColor, vec2 uv) {
-    vec2 buildingUv = uv * 30.0;
-    vec2 grid = fract(buildingUv) - 0.5;
-    float building = step(0.1, abs(grid.x)) * step(0.1, abs(grid.y));
-    
-    vec2 windowUv = fract(buildingUv * 3.0);
-    float windows = step(0.3, windowUv.x) * step(0.7, windowUv.x) * 
-                   step(0.3, windowUv.y) * step(0.7, windowUv.y);
-    
-    vec3 concrete = vec3(0.5, 0.5, 0.55);
-    vec3 darkConcrete = vec3(0.3, 0.3, 0.35);
-    vec3 windowLight = vec3(1.0, 0.9, 0.6);
-    
-    vec3 cityColor = mix(darkConcrete, concrete, building);
-    cityColor = mix(cityColor, windowLight, windows * building * 0.7);
-    
-    return cityColor;
-}
-
-// Desert dune patterns
-vec3 applyDesertPattern(vec3 baseColor, vec2 uv) {
-    vec2 duneUv = uv * 12.0;
-    float dunes = fbm(duneUv * 0.3);
-    dunes += sin(duneUv.x * 2.0) * sin(duneUv.y * 1.5) * 0.3;
-    
-    dunes = smoothstep(0.2, 0.8, dunes);
-    
-    vec3 darkSand = vec3(0.8, 0.6, 0.2);
-    vec3 lightSand = vec3(1.0, 0.9, 0.6);
-    vec3 goldSand = vec3(1.0, 0.8, 0.3);
-    
-    vec3 desertColor = mix(darkSand, lightSand, dunes);
-    if (dunes > 0.6) {
-        desertColor = mix(desertColor, goldSand, (dunes - 0.6) * 2.5);
-    }
-    
-    return desertColor;
-}
-
-// Identify terrain type by color
-int identifyTerrain(vec3 color) {
-    // Water: [74, 144, 226] / 255 = [0.29, 0.565, 0.886]
-    if (abs(color.r - 0.29) < 0.1 && abs(color.g - 0.565) < 0.1 && abs(color.b - 0.886) < 0.1) {
-        return 0; // Water
-    }
-    // Forest: [126, 211, 33] / 255 = [0.494, 0.827, 0.129]
-    if (abs(color.r - 0.494) < 0.1 && abs(color.g - 0.827) < 0.1 && abs(color.b - 0.129) < 0.1) {
-        return 1; // Forest
-    }
-    // City: [155, 155, 155] / 255 = [0.608, 0.608, 0.608]
-    if (abs(color.r - 0.608) < 0.1 && abs(color.g - 0.608) < 0.1 && abs(color.b - 0.608) < 0.1) {
-        return 2; // City
-    }
-    // Mountain: [139, 69, 19] / 255 = [0.545, 0.271, 0.075]
-    if (abs(color.r - 0.545) < 0.1 && abs(color.g - 0.271) < 0.1 && abs(color.b - 0.075) < 0.1) {
-        return 3; // Mountain
-    }
-    // Desert: [245, 166, 35] / 255 = [0.961, 0.651, 0.137]
-    if (abs(color.r - 0.961) < 0.1 && abs(color.g - 0.651) < 0.1 && abs(color.b - 0.137) < 0.1) {
-        return 4; // Desert
-    }
-    return -1; // Unknown
-}
-
-void main() {
-    if (u_hasTexture) {
-        vec4 originalColor = texture2D(u_originalTexture, v_texCoord);
-        
-        if (u_mode == 0) {
-            // Original mode
-            gl_FragColor = originalColor;
-        } else if (u_mode == 1) {
-            // Segmented mode with procedural patterns
-            vec4 segmentedColor = texture2D(u_segmentedTexture, v_texCoord);
-            
-            int terrainType = identifyTerrain(segmentedColor.rgb);
-            vec3 finalColor = segmentedColor.rgb;
-            
-            if (terrainType == 0) {
-                finalColor = applyWaterPattern(segmentedColor.rgb, v_texCoord);
-            } else if (terrainType == 1) {
-                finalColor = applyForestPattern(segmentedColor.rgb, v_texCoord);
-            } else if (terrainType == 2) {
-                finalColor = applyCityPattern(segmentedColor.rgb, v_texCoord);
-            } else if (terrainType == 3) {
-                finalColor = applyMountainPattern(segmentedColor.rgb, v_texCoord);
-            } else if (terrainType == 4) {
-                finalColor = applyDesertPattern(segmentedColor.rgb, v_texCoord);
-            }
-            
-            gl_FragColor = vec4(finalColor, segmentedColor.a);
-        } else {
-            // Overlay mode
-            vec4 segmentedColor = texture2D(u_segmentedTexture, v_texCoord);
-            gl_FragColor = mix(originalColor, segmentedColor, u_overlayStrength);
-        }
-    } else {
-        // Default terrain-themed gradient when no image is loaded
-        vec2 uv = v_texCoord;
-        vec3 color1 = vec3(0.2, 0.4, 0.2); // Dark green
-        vec3 color2 = vec3(0.1, 0.6, 0.3); // Forest green
-        vec3 color = mix(color1, color2, uv.x * uv.y);
-        gl_FragColor = vec4(color, 1.0);
-    }
-}`;
+        return await response.text();
     }
     
     async createShaderProgram() {
-        let vertexShaderSource, fragmentShaderSource;
-        
         try {
-            // Try to load shader sources from external files first
-            console.log('Attempting to load external shader files...');
-            vertexShaderSource = await this.loadShaderFile('./shaders/vertex.glsl');
-            fragmentShaderSource = await this.loadShaderFile('./shaders/fragment.glsl');
+            // Load shader sources from external files
+            console.log('Loading external shader files...');
+            const vertexShaderSource = await this.loadShaderFile('./shaders/vertex.glsl');
+            const fragmentShaderSource = await this.loadShaderFile('./shaders/fragment.glsl');
             
-            console.log('✓ Successfully loaded external shader files');
-            console.log('Vertex shader preview:', vertexShaderSource.substring(0, 50) + '...');
-            console.log('Fragment shader preview:', fragmentShaderSource.substring(0, 50) + '...');
+            console.log('✓ Successfully loaded shader files');
             
-        } catch (error) {
-            // Fall back to inline shaders if external files can't be loaded
-            console.warn('External shader loading failed, using fallback inline shaders');
-            console.log('💡 Tip: For external shader files to work, serve this page via HTTP (e.g., use Live Server extension)');
-            
-            vertexShaderSource = this.getFallbackVertexShader();
-            fragmentShaderSource = this.getFallbackFragmentShader();
-            
-            console.log('✓ Using fallback inline shaders');
-        }
-        
-        try {
             // Create shaders
             const vertexShader = this.createShader(this.gl.VERTEX_SHADER, vertexShaderSource);
             const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, fragmentShaderSource);
@@ -360,9 +129,82 @@ void main() {
             
         } catch (error) {
             console.error('Failed to create shader program:', error);
-            alert('Critical error: Failed to compile shaders. Check browser console for details.');
+            alert('Critical error: Failed to load or compile shaders. Please ensure the shaders folder contains vertex.glsl and fragment.glsl files, and serve the page via HTTP (e.g., using Live Server extension).');
             throw error;
         }
+    }
+    
+    async createPostProcessShader() {
+        try {
+            // Load shaders from external files
+            console.log('Loading post-process shader files...');
+            const vertexShaderSource = await this.loadShaderFile('./shaders/vertex.glsl');
+            const postProcessShaderSource = await this.loadShaderFile('./shaders/postprocess.glsl');
+            
+            console.log('✓ Successfully loaded post-process shader files');
+            
+            // Create post-process shaders
+            const vertexShader = this.createShader(this.gl.VERTEX_SHADER, vertexShaderSource);
+            const fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, postProcessShaderSource);
+            
+            if (!vertexShader || !fragmentShader) {
+                throw new Error('Failed to compile post-process shaders');
+            }
+            
+            // Create post-process program
+            this.postProcessProgram = this.gl.createProgram();
+            this.gl.attachShader(this.postProcessProgram, vertexShader);
+            this.gl.attachShader(this.postProcessProgram, fragmentShader);
+            this.gl.linkProgram(this.postProcessProgram);
+            
+            if (!this.gl.getProgramParameter(this.postProcessProgram, this.gl.LINK_STATUS)) {
+                console.error('Error linking post-process shader program:', this.gl.getProgramInfoLog(this.postProcessProgram));
+                throw new Error('Failed to link post-process shader program');
+            }
+            
+            // Get post-process uniform locations
+            this.postProcessInputTextureLocation = this.gl.getUniformLocation(this.postProcessProgram, 'u_inputTexture');
+            this.postProcessTimeLocation = this.gl.getUniformLocation(this.postProcessProgram, 'u_time');
+            this.postProcessResolutionLocation = this.gl.getUniformLocation(this.postProcessProgram, 'u_resolution');
+            this.postProcessPositionLocation = this.gl.getAttribLocation(this.postProcessProgram, 'a_position');
+            this.postProcessTexCoordLocation = this.gl.getAttribLocation(this.postProcessProgram, 'a_texCoord');
+            
+            console.log('✓ Post-process shader program successfully created');
+            
+        } catch (error) {
+            console.error('Failed to create post-process shader program:', error);
+            console.warn('Post-processing disabled. The app will run with basic terrain effects only.');
+            // Don't block the app, just disable post-processing
+            this.postProcessProgram = null;
+        }
+    }
+    
+    createFramebuffer() {
+        // Create framebuffer for first rendering pass
+        this.framebuffer = this.gl.createFramebuffer();
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffer);
+        
+        // Create texture to render to
+        this.framebufferTexture = this.gl.createTexture();
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.framebufferTexture);
+        this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.canvas.width, this.canvas.height, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, null);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+        this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+        
+        // Attach texture to framebuffer
+        this.gl.framebufferTexture2D(this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0, this.gl.TEXTURE_2D, this.framebufferTexture, 0);
+        
+        // Check framebuffer status
+        if (this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER) !== this.gl.FRAMEBUFFER_COMPLETE) {
+            console.error('Framebuffer not complete');
+        }
+        
+        // Bind back to default framebuffer
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        
+        console.log('✓ Framebuffer created for dual-pass rendering');
     }
     
     createShader(type, source) {
@@ -809,6 +651,12 @@ void main() {
         this.canvas.style.height = height + 'px';
         
         this.gl.viewport(0, 0, width, height);
+        
+        // Update framebuffer size
+        if (this.framebufferTexture) {
+            this.gl.bindTexture(this.gl.TEXTURE_2D, this.framebufferTexture);
+            this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, width, height, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, null);
+        }
     }
     
     loadOriginalTexture(image) {
@@ -826,6 +674,9 @@ void main() {
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+        
+        // Flip Y coordinate to match WebGL texture coordinate system
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
         
         // Upload image to texture
         this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, image);
@@ -847,15 +698,43 @@ void main() {
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
         this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
         
+        // Flip Y coordinate to match WebGL texture coordinate system
+        this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
+        
         // Upload canvas to texture
         this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, this.gl.RGBA, this.gl.UNSIGNED_BYTE, canvas);
     }
     
     render() {
-        // Clear the canvas
+        if (!this.postProcessProgram) {
+            // Single-pass rendering (fallback)
+            this.renderSinglePass();
+            return;
+        }
+        
+        // **PASS 1: Render terrain effects to framebuffer**
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffer);
+        this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
         this.gl.clear(this.gl.COLOR_BUFFER_BIT);
         
-        // Use our shader program
+        this.renderTerrainPass();
+        
+        // **PASS 2: Render post-processed result to canvas**
+        this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        
+        this.renderPostProcessPass();
+    }
+    
+    renderSinglePass() {
+        // Original single-pass rendering for fallback
+        this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+        this.renderTerrainPass();
+    }
+    
+    renderTerrainPass() {
+        // Use main shader program for terrain effects
         this.gl.useProgram(this.program);
         
         // Bind vertex buffer and set up attributes
@@ -863,11 +742,13 @@ void main() {
         
         // Position attribute (2 floats per vertex)
         this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
+        this.gl.enableVertexAttribArray(this.positionLocation);
         
         // Texture coordinate attribute (2 floats per vertex, offset by 8 bytes)
         this.gl.vertexAttribPointer(this.texCoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+        this.gl.enableVertexAttribArray(this.texCoordLocation);
         
-        // Set uniforms
+        // Set uniforms for terrain rendering
         if (this.originalTexture) {
             // Bind original texture to texture unit 0
             this.gl.activeTexture(this.gl.TEXTURE0);
@@ -901,6 +782,35 @@ void main() {
         }
         
         // Draw the quad
+        this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
+    }
+    
+    renderPostProcessPass() {
+        // Use post-process shader program
+        this.gl.useProgram(this.postProcessProgram);
+        
+        // Bind vertex buffer and set up attributes for post-processing
+        this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+        
+        // Position attribute
+        this.gl.vertexAttribPointer(this.postProcessPositionLocation, 2, this.gl.FLOAT, false, 16, 0);
+        this.gl.enableVertexAttribArray(this.postProcessPositionLocation);
+        
+        // Texture coordinate attribute
+        this.gl.vertexAttribPointer(this.postProcessTexCoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+        this.gl.enableVertexAttribArray(this.postProcessTexCoordLocation);
+        
+        // Bind the framebuffer texture as input
+        this.gl.activeTexture(this.gl.TEXTURE0);
+        this.gl.bindTexture(this.gl.TEXTURE_2D, this.framebufferTexture);
+        this.gl.uniform1i(this.postProcessInputTextureLocation, 0);
+        
+        // Set post-process uniforms
+        const currentTime = (Date.now() - this.startTime) / 1000.0;
+        this.gl.uniform1f(this.postProcessTimeLocation, currentTime);
+        this.gl.uniform2f(this.postProcessResolutionLocation, this.canvas.width, this.canvas.height);
+        
+        // Draw the post-processed quad
         this.gl.drawArrays(this.gl.TRIANGLES, 0, 6);
     }
     
