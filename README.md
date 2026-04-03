@@ -128,9 +128,6 @@ if (similar_RGB_values && brightness > threshold) → City
 - Safari 11+
 - Edge 79+
 
-**Limited Support:**
-- Internet Explorer: Not supported (lacks WebGL 1.0)
-
 ## Running the Application
 
 1. **Local File**: Simply open `index.html` in your browser
@@ -139,32 +136,8 @@ if (similar_RGB_values && brightness > threshold) → City
    python -m http.server 8000
    # Navigate to http://localhost:8000
    ```
-
-## Future Enhancements
-
-### Planned Features
-- 🤖 **Machine Learning Integration**: TensorFlow.js for improved classification
-- 📊 **Statistical Analysis**: Terrain percentage breakdown
-- 🎯 **Region Selection**: Click-and-drag area analysis  
-- 💾 **Export Options**: Save processed images and data
-- ⚡ **Real-time Processing**: Live segmentation as you upload
-- 🗺️ **Map Integration**: Direct Google Maps API integration
-
 ### Advanced Algorithms
 - Texture analysis for improved mountain detection
 - Edge detection for precise boundary identification  
 - Multi-scale analysis for handling various zoom levels
 - Contextual classification using neighboring pixels
-
-## Contributing
-
-This project welcomes contributions for:
-- Algorithm improvements
-- New terrain types
-- Performance optimizations  
-- UI/UX enhancements
-- Mobile compatibility
-
-## License
-
-Open source - feel free to modify and distribute for educational and research purposes.
