@@ -197,6 +197,11 @@ class TerrainSegmenter {
                 alert('Please upload a satellite image first!');
             }
         });
+        
+        // Initialize loading indicator
+        this.loadingOverlay = document.getElementById('loadingOverlay');
+        this.loadingText = document.getElementById('loadingText');
+        this.loadingProgress = document.getElementById('loadingProgress');
     }
     
     handleImageUpload(event) {
@@ -210,7 +215,9 @@ class TerrainSegmenter {
                 this.currentImage = img;
                 this.loadOriginalTexture(img);
                 this.updateCanvasSize(img);
-                this.processTerrainSegmentation();
+                setTimeout(() => {
+                    this.processTerrainSegmentation();
+                }, 100); // Allow UI to update after image load
             };
             img.src = e.target.result;
         };
@@ -220,42 +227,102 @@ class TerrainSegmenter {
     processTerrainSegmentation() {
         if (!this.currentImage) return;
         
-        console.log('Processing terrain segmentation...');
+        // Show loading indicator
+        this.showLoading('Processing terrain segmentation...', 'Initializing image processing...');
         
-        // Create a canvas to process the image
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = this.currentImage.width;
-        canvas.height = this.currentImage.height;
-        
-        // Draw the image to get pixel data
-        ctx.drawImage(this.currentImage, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = imageData.data;
-        
-        // Process each pixel for terrain classification
-        for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1]; 
-            const b = data[i + 2];
-            
-            const terrainType = this.classifyTerrain(r, g, b);
-            const newColor = this.terrainColors[terrainType];
-            
-            data[i] = newColor[0];     // R
-            data[i + 1] = newColor[1]; // G
-            data[i + 2] = newColor[2]; // B
-            data[i + 3] = newColor[3]; // A
-        }
-        
-        // Create a new image from the processed data
-        ctx.putImageData(imageData, 0, 0);
-        
-        // Create texture from processed canvas
-        this.loadSegmentedTexture(canvas);
-        this.render();
-        
-        console.log('Terrain segmentation complete!');
+        // Use setTimeout to allow UI to update before heavy processing
+        setTimeout(() => {
+            try {
+                console.log('Processing terrain segmentation...');
+                
+                // Create a canvas to process the image
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = this.currentImage.width;
+                canvas.height = this.currentImage.height;
+                
+                // Draw the image to get pixel data
+                ctx.drawImage(this.currentImage, 0, 0);
+                let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                // Apply preprocessing steps to improve segmentation
+                this.updateLoadingProgress('Applying Gaussian blur...');
+                console.log('Applying blur preprocessing...');
+                imageData = this.applyGaussianBlur(imageData, 2.0);
+                
+                this.updateLoadingProgress('Removing text and noise...');
+                console.log('Removing text and noise...');
+                imageData = this.removeTextAndNoise(imageData);
+                
+                this.updateLoadingProgress('Applying noise reduction...');
+                console.log('Applying noise reduction...');
+                imageData = this.applyMedianFilter(imageData, 1);
+                const data = imageData.data;
+                
+                // Process each pixel for terrain classification
+                this.updateLoadingProgress('Classifying terrain features...');
+                const totalPixels = data.length / 4;
+                let processedPixels = 0;
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1]; 
+                    const b = data[i + 2];
+                    
+                    const terrainType = this.classifyTerrain(r, g, b);
+                    const newColor = this.terrainColors[terrainType];
+                    
+                    data[i] = newColor[0];     // R
+                    data[i + 1] = newColor[1]; // G
+                    data[i + 2] = newColor[2]; // B
+                    data[i + 3] = newColor[3]; // A
+                    
+                    processedPixels++;
+                    
+                    // Update progress every 10% of pixels processed
+                    if (processedPixels % Math.floor(totalPixels / 10) === 0) {
+                        const progress = Math.round((processedPixels / totalPixels) * 100);
+                        this.updateLoadingProgress(`Classifying terrain features... ${progress}%`);
+                    }
+                }
+                
+                // Create a new image from the processed data
+                this.updateLoadingProgress('Finalizing segmentation...');
+                ctx.putImageData(imageData, 0, 0);
+                
+                // Create texture from processed canvas
+                this.loadSegmentedTexture(canvas);
+                this.render();
+                
+                console.log('Terrain segmentation complete!');
+                
+                // Hide loading indicator
+                setTimeout(() => {
+                    this.hideLoading();
+                }, 500); // Small delay to show completion
+                
+            } catch (error) {
+                console.error('Error during segmentation:', error);
+                this.hideLoading();
+                alert('Error processing image. Please try again.');
+            }
+        }, 100); // Allow UI to update before processing
+    }
+    
+    showLoading(mainText, progressText) {
+        this.loadingText.textContent = mainText;
+        this.loadingProgress.textContent = progressText;
+        this.loadingOverlay.classList.remove('hidden');
+    }
+    
+    hideLoading() {
+        this.loadingOverlay.classList.add('hidden');
+    }
+    
+    updateLoadingProgress(progressText) {
+        this.loadingProgress.textContent = progressText;
+        // Force a repaint by accessing the element's offsetHeight
+        this.loadingProgress.offsetHeight;
     }
     
     classifyTerrain(r, g, b) {
@@ -299,6 +366,202 @@ class TerrainSegmenter {
         
         // Default to mountain for everything else
         return 'mountain';
+    }
+    
+    applyGaussianBlur(imageData, radius) {
+        const data = new Uint8ClampedArray(imageData.data);
+        const width = imageData.width;
+        const height = imageData.height;
+        
+        // Create Gaussian kernel
+        const kernelSize = Math.ceil(radius * 3) * 2 + 1;
+        const kernel = this.createGaussianKernel(kernelSize, radius);
+        const halfKernel = Math.floor(kernelSize / 2);
+        
+        // Apply horizontal blur
+        const tempData = new Uint8ClampedArray(data);
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                for (let c = 0; c < 3; c++) { // RGB channels only
+                    let sum = 0;
+                    let weightSum = 0;
+                    
+                    for (let k = -halfKernel; k <= halfKernel; k++) {
+                        const px = Math.max(0, Math.min(width - 1, x + k));
+                        const weight = kernel[k + halfKernel];
+                        sum += data[(y * width + px) * 4 + c] * weight;
+                        weightSum += weight;
+                    }
+                    
+                    tempData[(y * width + x) * 4 + c] = sum / weightSum;
+                }
+            }
+        }
+        
+        // Apply vertical blur
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                for (let c = 0; c < 3; c++) { // RGB channels only
+                    let sum = 0;
+                    let weightSum = 0;
+                    
+                    for (let k = -halfKernel; k <= halfKernel; k++) {
+                        const py = Math.max(0, Math.min(height - 1, y + k));
+                        const weight = kernel[k + halfKernel];
+                        sum += tempData[(py * width + x) * 4 + c] * weight;
+                        weightSum += weight;
+                    }
+                    
+                    data[(y * width + x) * 4 + c] = sum / weightSum;
+                }
+            }
+        }
+        
+        return new ImageData(data, width, height);
+    }
+    
+    createGaussianKernel(size, sigma) {
+        const kernel = new Array(size);
+        const center = Math.floor(size / 2);
+        let sum = 0;
+        
+        for (let i = 0; i < size; i++) {
+            const x = i - center;
+            kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
+            sum += kernel[i];
+        }
+        
+        // Normalize kernel
+        for (let i = 0; i < size; i++) {
+            kernel[i] /= sum;
+        }
+        
+        return kernel;
+    }
+    
+    removeTextAndNoise(imageData) {
+        const data = new Uint8ClampedArray(imageData.data);
+        const width = imageData.width;
+        const height = imageData.height;
+        
+        // Convert to grayscale for edge detection
+        const grayscale = new Uint8ClampedArray(width * height);
+        for (let i = 0; i < width * height; i++) {
+            const r = data[i * 4];
+            const g = data[i * 4 + 1];
+            const b = data[i * 4 + 2];
+            grayscale[i] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+        }
+        
+        // Apply edge detection (Sobel operator)
+        const edges = new Uint8ClampedArray(width * height);
+        for (let y = 1; y < height - 1; y++) {
+            for (let x = 1; x < width - 1; x++) {
+                const gx = 
+                    -1 * grayscale[(y - 1) * width + (x - 1)] +
+                     1 * grayscale[(y - 1) * width + (x + 1)] +
+                    -2 * grayscale[y * width + (x - 1)] +
+                     2 * grayscale[y * width + (x + 1)] +
+                    -1 * grayscale[(y + 1) * width + (x - 1)] +
+                     1 * grayscale[(y + 1) * width + (x + 1)];
+                
+                const gy = 
+                    -1 * grayscale[(y - 1) * width + (x - 1)] +
+                    -2 * grayscale[(y - 1) * width + x] +
+                    -1 * grayscale[(y - 1) * width + (x + 1)] +
+                     1 * grayscale[(y + 1) * width + (x - 1)] +
+                     2 * grayscale[(y + 1) * width + x] +
+                     1 * grayscale[(y + 1) * width + (x + 1)];
+                
+                edges[y * width + x] = Math.min(255, Math.sqrt(gx * gx + gy * gy));
+            }
+        }
+        
+        // Identify text-like regions (high edge density in small areas)
+        const textMask = new Uint8ClampedArray(width * height);
+        const windowSize = 5;
+        const threshold = 20;
+        
+        for (let y = windowSize; y < height - windowSize; y++) {
+            for (let x = windowSize; x < width - windowSize; x++) {
+                let edgeCount = 0;
+                let totalPixels = 0;
+                
+                for (let dy = -windowSize; dy <= windowSize; dy++) {
+                    for (let dx = -windowSize; dx <= windowSize; dx++) {
+                        if (edges[(y + dy) * width + (x + dx)] > 50) {
+                            edgeCount++;
+                        }
+                        totalPixels++;
+                    }
+                }
+                
+                if (edgeCount / totalPixels > 0.3) { // High edge density
+                    textMask[y * width + x] = 255;
+                }
+            }
+        }
+        
+        // Remove text regions by replacing with surrounding colors
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const idx = y * width + x;
+                if (textMask[idx] > 0) {
+                    // Find nearest non-text pixel and use its color
+                    let found = false;
+                    for (let radius = 1; radius <= 10 && !found; radius++) {
+                        for (let dy = -radius; dy <= radius && !found; dy++) {
+                            for (let dx = -radius; dx <= radius && !found; dx++) {
+                                const ny = y + dy;
+                                const nx = x + dx;
+                                if (ny >= 0 && ny < height && nx >= 0 && nx < width) {
+                                    const nIdx = ny * width + nx;
+                                    if (textMask[nIdx] === 0) {
+                                        data[idx * 4] = data[nIdx * 4];     // R
+                                        data[idx * 4 + 1] = data[nIdx * 4 + 1]; // G
+                                        data[idx * 4 + 2] = data[nIdx * 4 + 2]; // B
+                                        found = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return new ImageData(data, width, height);
+    }
+    
+    applyMedianFilter(imageData, radius) {
+        const data = new Uint8ClampedArray(imageData.data);
+        const width = imageData.width;
+        const height = imageData.height;
+        const windowSize = radius * 2 + 1;
+        
+        for (let y = radius; y < height - radius; y++) {
+            for (let x = radius; x < width - radius; x++) {
+                for (let c = 0; c < 3; c++) { // RGB channels only
+                    const values = [];
+                    
+                    // Collect values in the window
+                    for (let dy = -radius; dy <= radius; dy++) {
+                        for (let dx = -radius; dx <= radius; dx++) {
+                            const px = x + dx;
+                            const py = y + dy;
+                            values.push(data[(py * width + px) * 4 + c]);
+                        }
+                    }
+                    
+                    // Sort and find median
+                    values.sort((a, b) => a - b);
+                    const median = values[Math.floor(values.length / 2)];
+                    data[(y * width + x) * 4 + c] = median;
+                }
+            }
+        }
+        
+        return new ImageData(data, width, height);
     }
     
     updateCanvasSize(img) {

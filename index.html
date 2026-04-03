@@ -37,6 +37,15 @@
         
         <div class="canvas-container">
             <canvas id="glCanvas" width="800" height="600"></canvas>
+            
+            <!-- Loading Indicator -->
+            <div id="loadingOverlay" class="loading-overlay hidden">
+                <div class="loading-content">
+                    <div class="spinner"></div>
+                    <div id="loadingText" class="loading-text">Processing image...</div>
+                    <div id="loadingProgress" class="loading-progress">Initializing...</div>
+                </div>
+            </div>
         </div>
         
         <div class="legend">
