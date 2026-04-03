@@ -1,0 +1,217 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #2c5530 0%, #1a472a 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    text-align: center;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+h1 {
+    color: #2c5530;
+    margin-bottom: 10px;
+    font-size: 2.8em;
+    font-weight: 300;
+}
+
+.subtitle {
+    color: #5a7c5a;
+    font-size: 1.2em;
+    margin-bottom: 30px;
+    font-weight: 300;
+}
+
+.upload-section {
+    margin-bottom: 30px;
+}
+
+#imageInput {
+    display: none;
+}
+
+.upload-btn {
+    display: inline-block;
+    padding: 12px 30px;
+    background: linear-gradient(45deg, #2c5530, #4a7c59);
+    color: white;
+    border: none;
+    border-radius: 25px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(44, 85, 48, 0.3);
+    margin-right: 10px;
+}
+
+.upload-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(44, 85, 48, 0.4);
+}
+
+.process-btn {
+    display: inline-block;
+    padding: 10px 25px;
+    background: linear-gradient(45deg, #c67e00, #d4940f);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: 0 3px 12px rgba(198, 126, 0, 0.3);
+}
+
+.process-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 15px rgba(198, 126, 0, 0.4);
+}
+
+.controls-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 15px;
+    backdrop-filter: blur(10px);
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+
+.control-group label {
+    font-size: 12px;
+    color: #2c5530;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.control-group select,
+.control-group input[type="range"] {
+    padding: 5px 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    font-size: 14px;
+}
+
+.control-group input[type="range"] {
+    width: 120px;
+}
+
+#sensitivityValue {
+    font-size: 12px;
+    color: #2c5530;
+    font-weight: bold;
+}
+
+.canvas-container {
+    margin: 30px 0;
+    display: inline-block;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+#glCanvas {
+    display: block;
+    background: #f0f0f0;
+    border: 2px solid #ddd;
+}
+
+.instructions {
+    color: #666;
+    font-style: italic;
+    margin-top: 20px;
+}
+
+.instructions p {
+    margin: 5px 0;
+}
+
+.legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    justify-content: center;
+    margin: 20px 0;
+    padding: 15px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    backdrop-filter: blur(5px);
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: #2c5530;
+    font-weight: 500;
+}
+
+.color-box {
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.color-box.water { background-color: #4A90E2; }
+.color-box.forest { background-color: #7ED321; }
+.color-box.city { background-color: #9B9B9B; }
+.color-box.mountain { background-color: #8B4513; }
+.color-box.desert { background-color: #F5A623; }
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .container {
+        margin: 20px;
+        padding: 15px;
+    }
+    
+    h1 {
+        font-size: 2em;
+    }
+    
+    .controls-section {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .legend {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    #glCanvas {
+        width: 100%;
+        max-width: 400px;
+        height: auto;
+    }
+}
